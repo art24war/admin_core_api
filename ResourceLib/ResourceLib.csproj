@@ -1,0 +1,33 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Page Include="enums.resx">
+      <Generator>PublicResXFileCodeGenerator</Generator>
+      <LastGenOutput>enums.Designer.cs</LastGenOutput>
+      <CustomToolNamespace>Resource</CustomToolNamespace>
+    </Page>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="enums.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>enums.resx</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Update="enums.resx">
+      <Generator>PublicResXFileCodeGenerator</Generator>
+      <LastGenOutput>enums.Designer.cs</LastGenOutput>
+      <CustomToolNamespace>resourceLib</CustomToolNamespace>
+    </EmbeddedResource>
+  </ItemGroup>
+
+
+
+</Project>
