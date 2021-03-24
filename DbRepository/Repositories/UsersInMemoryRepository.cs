@@ -32,7 +32,7 @@ namespace DbRepository.Repositories
                 (string.IsNullOrEmpty(filter.UserLogin) || r.Login.Equals(filter.UserLogin)) &&
                 (!filter.UserId.HasValue || r.Id.Equals(filter.UserId.Value)) &&
                 (!filter.DealerId.HasValue || (r.Dealer != null && r.Dealer.Id.Equals(filter.DealerId.Value)))
-              );
+                );
             
             return await result.ToListAsync();
         }

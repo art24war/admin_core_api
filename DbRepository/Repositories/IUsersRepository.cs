@@ -25,7 +25,7 @@ namespace DbRepository.Repositories
         /// <param name="pwdHash">User password hash(sha256 from password)</param>
         /// <returns></returns>
         Task<LoginResponse> LoginUserAsync(string login, string pwdHash);
-
+        
         /// <summary>
         /// 
         /// </summary>

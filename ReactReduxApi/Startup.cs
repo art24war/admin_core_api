@@ -76,7 +76,7 @@ namespace ReactReduxApi
 
             if (env.IsDevelopment())
             {
-                app.UseDeveloperExceptionPage();                
+                app.UseDeveloperExceptionPage();
             } else
                 app.UseHsts();
 
@@ -90,7 +90,7 @@ namespace ReactReduxApi
             
             app.UseHttpsRedirection();
             app.UseCors(builder=> builder.WithOrigins(_configuration["Origins"].Split(","))
-                .AllowAnyHeader()                
+                .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials()
             ); //temporary in dev
@@ -123,7 +123,7 @@ namespace ReactReduxApi
                 routes.MapRoute(
                     name: "default",
                     template: "{controller=Home}/{action=Index}/{id?}");
-            });
+            });            
         }        
     }
 }
