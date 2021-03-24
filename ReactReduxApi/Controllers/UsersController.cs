@@ -18,6 +18,8 @@ using DbModels.Filters;
 using AutoMapper;
 using ReactReduxApi.Models.Users;
 using Microsoft.AspNetCore.Http;
+using CommonLib;
+using ReactReduxApi.Models.Enums;
 
 namespace ReactReduxApi.Controllers
 {
@@ -60,94 +62,95 @@ namespace ReactReduxApi.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> LoginUser(LoginUserModel model)
         {
-            if (string.IsNullOrEmpty(model.Login) || string.IsNullOrEmpty(model.Password))
+            if (model.Mode.ToLowerInvariant().Equals(LoginModeType.Password.ToString().ToLowerInvariant()) &&
+                (string.IsNullOrEmpty(model.Login) || string.IsNullOrEmpty(model.Password)))
                 return ReturnBadRequest("login or password is empty");
-            var result = await _usersRepository.LoginUser(model.Login, CryptoHelper.GetSha256String(model.Password));
-            if (result.Item1 != null )
+
+            var refreshTokenBuilder = new SecurityTokenBuilder()
+                                .AddConfiguration(_configuration)
+                                .AddEncriptionKey(Constants.JwtRefreshEncriptionKey)
+                                .AddIssuerKey(Constants.JwtIssuer)
+                                .AddAudienceKey(Constants.JwtAudience)
+                                .AddExpiryKey(Constants.JwtRefreshTokenExpiration);
+
+            var tokenBuilder = new SecurityTokenBuilder()
+                                .AddConfiguration(_configuration)
+                                .AddEncriptionKey(Constants.JwtEncryptionKey)
+                                .AddIssuerKey(Constants.JwtIssuer)
+                                .AddAudienceKey(Constants.JwtAudience)
+                                .AddExpiryKey(Constants.JwtExpiryTime);
+
+            switch (model.Mode.ToLowerInvariant())
             {
-                if (result.Item2)
-                {
-                    var tokenHandler = new JwtSecurityTokenHandler();
-                    HttpContext.Response.Cookies.Append(_configuration.GetValue<string>("Jwt:CookieToken"),
-                            tokenHandler.WriteToken(GetSecurityToken(GetUserClaims(result.Item1), tokenHandler)),
-                        new CookieOptions
+                case "password":
+                    var result = await _usersRepository.LoginUserAsync(model.Login, CryptoHelper.GetSha256String(model.Password));
+                    if (result.User != null)
+                    {
+                        string refreshToken = string.Empty;
+                        
+                        if (result.LoginResult)
+                        {                            
+                            tokenBuilder.AddClaims(CryptoHelper.GetUserClaims(result.User));                             
+                            refreshTokenBuilder.AddClaims(CryptoHelper.GetRefreshUserClaims(result.User));
+
+                            HttpContext.Response.Cookies.Append(_configuration.GetValue<string>(Constants.JwtCookieToken),
+                                    tokenBuilder.BuildAccessToken(),
+                                new CookieOptions
+                                {
+                                    MaxAge = TimeSpan.FromMinutes(_configuration.GetValue<int>(Constants.JwtExpiryTime)),
+                                    HttpOnly = true
+                                });
+                            refreshToken = refreshTokenBuilder.BuildAccessToken();
+
+                            var refreshTokenModel = new RefreshToken
+                            {
+                                UserId = result.User.Id,
+                                Token = refreshToken,
+                                ValidTo = DateTime.UtcNow.AddMinutes(_configuration.GetValue<double>(Constants.JwtRefreshTokenExpiration))
+                            };
+                            var _ = await _usersRepository.RefreshToken(model.Login, refreshTokenModel);
+                        }
+                        return result.LoginResult ? Ok(CryptoHelper.GetUserToken(result.User, tokenBuilder, refreshToken)) : ReturnBadRequest("login failed");
+                    }
+                    else
+                        return ReturnBadRequest("user not found");
+                case "refresh":
+                    refreshTokenBuilder.AddAccessToken(model.RefreshToken);                    
+                    var userId = refreshTokenBuilder.GetUserId();
+                    var userResult = await _usersRepository.CheckUserRefreshTokenAsync(userId, model.RefreshToken);
+                    if (userResult.LoginResult)
+                    {
+                        var user = userResult.User;
+                        refreshTokenBuilder.AddClaims(CryptoHelper.GetRefreshUserClaims(user));
+                        refreshTokenBuilder.SetCreateNew();
+                        var refreshToken = refreshTokenBuilder.BuildAccessToken();
+                        var refreshTokenModel = new RefreshToken
                         {
-                            MaxAge = TimeSpan.FromMinutes(_configuration.GetValue<int>("Jwt:ExpiryTimeInMinutes"))
-                        });
-                }
-                return result.Item2 ? Ok(GetUserToken(result.Item1)) : ReturnBadRequest("login failed");
+                            UserId = user.Id,
+                            Token = refreshToken,
+                            ValidTo = DateTime.UtcNow.AddMinutes(_configuration.GetValue<double>(Constants.JwtRefreshTokenExpiration))
+                        };
+                        var _ = await _usersRepository.RefreshToken(userId, refreshTokenModel);
+                        
+                        tokenBuilder.AddClaims(CryptoHelper.GetUserClaims(user));
+                        return Ok(CryptoHelper.GetUserToken(user, tokenBuilder, refreshToken));
+                    }
+                    else 
+                        return Unauthorized("refreshToken not valid");
+                    
+                default:
+                    return Unauthorized("mode is not found");                   
             }
-            else
-                return ReturnBadRequest("user not found");            
+            
         }
 
-        [Route("list")]
+                [Route("list")]
         [Authorize]
         [HttpPost]
         public async Task<IActionResult> GetUsers(UserModelFilter userModelFilter)
         {
             var result = await _usersRepository.GetUsers(userModelFilter);
             return Ok(_mapper.Map<IEnumerable<UserListModel>>(result));
-        }
-
-        private object GetUserToken(DbModels.UserModel user)
-        {
-            var claims = GetUserClaims(user);
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var token = GetSecurityToken(claims, tokenHandler);
-            return new {
-                id = user.Id,
-                userName = user.Login,
-                token = tokenHandler.WriteToken(token),
-                expired = token.ValidTo,
-                userType = user.UserType,
-                roles = user.Roles?.Select(role => role.Role.RoleCode) ?? Array.Empty<string>()
-            };
-        }
-
-        private ClaimsIdentity GetUserClaims(UserModel user)
-        {
-            if (user.Roles == null)
-                user.Roles = new List<UsersRoleRelation>();
-            var claims = new ClaimsIdentity(new Claim[]
-                                   {
-                                    new Claim(JwtRegisteredClaimNames.Sub, user.Login),
-                                    new Claim("UserId", user.Id.ToString()),
-                                    new Claim("UserType", user.UserType.ToString() )
-                                   });
-            switch (user.UserType)
-            {
-                case UserTypeEnum.Admin:
-                case UserTypeEnum.Manager:
-                    user.Roles.Add(new UsersRoleRelation { Role = new RoleModel { RoleCode = user.UserType.GetDisplayName() } });
-                    claims.AddClaim(new Claim(ClaimsIdentity.DefaultRoleClaimType, user.UserType.GetDisplayName()));
-                    break;
-            }
-            //Adding UserClaims to JWT claims
-            foreach (var item in user.Roles ?? new List<UsersRoleRelation>())
-            {
-                claims.AddClaim(new Claim(ClaimsIdentity.DefaultRoleClaimType, item.Role.RoleCode));
-            }
-            return claims;
-        }
-
-        private SecurityToken GetSecurityToken(ClaimsIdentity claims, JwtSecurityTokenHandler tokenHandler) {
-            // this information will be retrived from you Configuration
-            //I have injected Configuration provider service into my controller
-            var encryptionkey = _configuration["Jwt:EncriptionKey"];
-            var key = Encoding.ASCII.GetBytes(encryptionkey);
-            var tokenDescriptor = new SecurityTokenDescriptor
-            {
-                Issuer = _configuration["Jwt:Issuer"],
-                Subject = claims,
-                // this information will be retrived from you Configuration
-                //I have injected Configuration provider service into my controller
-                Expires = DateTime.UtcNow.AddMinutes(Convert.ToDouble(_configuration["Jwt:ExpiryTimeInMinutes"])),
-                //algorithm to sign the token
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
-            };
-
-            return tokenHandler.CreateToken(tokenDescriptor);
         }
 
         private BadRequestObjectResult ReturnBadRequest(string failedMessage)

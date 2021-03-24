@@ -1,3 +1,4 @@
+using CommonLib;
 using DbRepository;
 using DbRepository.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -12,13 +13,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 using ReactReduxApi.Helpers;
+using System;
 using System.Text;
 
 namespace ReactReduxApi
 {
     public class Startup
     {
-        private IConfiguration _configuration;
+        private readonly IConfiguration _configuration;
 
         public Startup(IConfiguration configuration)
         {
@@ -52,7 +54,8 @@ namespace ReactReduxApi
                         IssuerSigningKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(_configuration["Jwt:EncriptionKey"])),
                         ValidateAudience = false,
                         ValidateLifetime = true,
-                        ValidIssuer = _configuration["Jwt:Issuer"]
+                        ValidIssuer = _configuration["Jwt:Issuer"],
+                        ClockSkew = TimeSpan.Zero
                     };
                     builder.ClaimsIssuer = _configuration["Jwt:Issuer"];   
                 });
@@ -73,9 +76,10 @@ namespace ReactReduxApi
 
             if (env.IsDevelopment())
             {
-                app.UseDeveloperExceptionPage();
+                app.UseDeveloperExceptionPage();                
             } else
                 app.UseHsts();
+
             app.Use(async (context, next) =>
             {
                 context.Response.Headers.Add("X-Content-Type-Options", "nosniff");
@@ -83,16 +87,18 @@ namespace ReactReduxApi
                 context.Response.Headers.Add("X-Frame-Options", "DENY");
                 await next();
             });
+            
             app.UseHttpsRedirection();
-            app.UseCors(builder=> builder.WithOrigins(_configuration.GetValue<string>("Origins"))
-                .AllowAnyHeader()
+            app.UseCors(builder=> builder.WithOrigins(_configuration["Origins"].Split(","))
+                .AllowAnyHeader()                
                 .AllowAnyMethod()
                 .AllowCredentials()
             ); //temporary in dev
+
             app.UseCookiePolicy(new CookiePolicyOptions
             {
                 MinimumSameSitePolicy = SameSiteMode.Strict,
-                HttpOnly = HttpOnlyPolicy.Always,
+                HttpOnly = HttpOnlyPolicy.None,
                 Secure = CookieSecurePolicy.Always
             });
             app.UseStaticFiles();
@@ -100,13 +106,14 @@ namespace ReactReduxApi
             {
                 if (!context.Request.Headers.ContainsKey("Authorization"))
                 {
-                    var token = context.Request.Cookies[_configuration.GetValue<string>("Jwt:CookieToken")];
+                    var token = context.Request.Cookies[_configuration[Constants.JwtCookieToken]];
                     if (!string.IsNullOrEmpty(token))
                         context.Request.Headers.Add("Authorization", "Bearer " + token);
                 }
                 
                 await next();
             });
+            
             app.UseAuthentication();
             app.UseAuthorization();
 
@@ -116,7 +123,7 @@ namespace ReactReduxApi
                 routes.MapRoute(
                     name: "default",
                     template: "{controller=Home}/{action=Index}/{id?}");
-            });            
+            });
         }        
     }
 }

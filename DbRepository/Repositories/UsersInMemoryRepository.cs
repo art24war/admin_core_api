@@ -1,5 +1,6 @@
 ﻿using DbModels;
 using DbModels.Filters;
+using DbRepository.Repositories.Models;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -15,32 +16,47 @@ namespace DbRepository.Repositories
         {
         }
 
-        async Task<UserModel> IUsersRepository.GetUserById(int id)
+        async Task<UserModel> IUsersRepository.GetUserByIdAsync(int id)
         {
             using var context = GetContext();
-            var users = context.Users.AsQueryable();
+            var users = context.Users.Include(u => u.Roles).AsQueryable().AsNoTracking();
             return await users.FirstOrDefaultAsync(u => u.Id == id);
         }
 
         async Task<IEnumerable<UserModel>> IUsersRepository.GetUsers(UserModelFilter filter)
         {
             using var context = GetContext();
-            var users = context.Users.AsQueryable();
+            var users = context.Users.Include(u => u.Roles).AsQueryable().AsNoTracking();
            
             var result = users.Where(r =>
                 (string.IsNullOrEmpty(filter.UserLogin) || r.Login.Equals(filter.UserLogin)) &&
                 (!filter.UserId.HasValue || r.Id.Equals(filter.UserId.Value)) &&
                 (!filter.DealerId.HasValue || (r.Dealer != null && r.Dealer.Id.Equals(filter.DealerId.Value)))
-                );
+              );
             
             return await result.ToListAsync();
         }
 
-        async Task<Tuple<UserModel, bool>> IUsersRepository.LoginUser(string login, string pwdHash)
+        async Task<LoginResponse> IUsersRepository.LoginUserAsync(string login, string pwdHash)
         {
             using var context = GetContext();
-            var user = await context.Users.FirstOrDefaultAsync(u => u.Login.Equals(login));
-            return new Tuple<UserModel, bool>(user, user?.PasswordHash.Equals(pwdHash)?? false);            
+            var user = (await context.Users.Include(u=> u.Roles).FirstOrDefaultAsync(u => u.Login.Equals(login)));
+            return new LoginResponse { User = user, LoginResult = user?.PasswordHash.Equals(pwdHash) ?? false };            
+        }
+
+        async Task<LoginResponse> IUsersRepository.CheckUserRefreshTokenAsync(string login, string refreshToken)
+        {
+            using var context = GetContext();
+            var userLogin = await context.Users.FirstOrDefaultAsync(c => c.Login.Equals(login));
+            //            userLogin.RefreshTokens
+            var refreshTokens = 
+                await (userLogin != null ? 
+                    context.Entry(userLogin).Collection(c=> c.RefreshTokens).Query().ToListAsync() : 
+                    Task.FromResult(new List<RefreshToken>()));
+            var result = userLogin != null &&
+                (userLogin.RefreshTokens?.Any(t => t.Token.Equals(refreshToken) && t.ValidTo >= DateTime.UtcNow) ?? false);
+
+            return await Task.FromResult(new LoginResponse { LoginResult = result, User = userLogin, RefreshToken = refreshToken });
         }
 
         async Task<UserModel> IUsersRepository.CreateUser(UserModel userModel)
@@ -56,12 +72,31 @@ namespace DbRepository.Repositories
             return ContextFactory.CreateUserDbContext(ConnectionString);
         }
 
-        public async Task<DealerModel> GetDealer(int? dealerId)
+        async Task<DealerModel> IUsersRepository.GetDealer(int? dealerId)
         {
             using var context = GetContext();
             return dealerId.HasValue ? 
                 await context.Dealers.FirstOrDefaultAsync(d => d.Id.Equals(dealerId.Value)) : 
                 await Task.FromResult<DealerModel>(null);
+        }
+
+        async Task<LoginResponse> IUsersRepository.RefreshToken(string login, RefreshToken token)
+        {
+            using var context = GetContext();
+            var user = await context.Users.FirstOrDefaultAsync(c => c.Login.Equals(login));
+            if(user != null)
+            {
+                if (user.RefreshTokens == null)
+                    user.RefreshTokens = new List<RefreshToken>();
+                var refreshTokens = await context.Entry(user).Collection(t => t.RefreshTokens).Query().ToListAsync();
+                
+                refreshTokens.ForEach(f => {
+                    context.Remove(f);
+                });
+                user.RefreshTokens.Add(token);
+                await context.SaveChangesAsync();
+            }
+            return await Task.FromResult(new LoginResponse { User = user, LoginResult = user != null });
         }
     }
 }

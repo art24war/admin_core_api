@@ -27,7 +27,7 @@ namespace ReactReduxApi.Helpers
                     names.Add(GetSingleDisplayName(flag));
                 }
             }
-            if (names.Count <= 0) throw new ArgumentException();
+            if (names.Count <= 0) throw new ArgumentException("Names list is empty");
             if (names.Count == 1) return names.First();
             return string.Join(",", names);
         }

@@ -14,5 +14,10 @@ namespace DbRepository
         public DbSet<RoleModel> Roles { get; set; }
         public DbSet<RoleGroupModel> RoleGroups { get; set; }
         public DbSet<DealerModel> Dealers { get; set; }
+
+        protected override void OnModelCreating(ModelBuilder builder)
+        {
+            builder.Entity<RefreshToken>().HasKey(new[] { "UserId", "Token" });
+        }
     }
 }
