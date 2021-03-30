@@ -154,66 +154,7 @@ namespace ReactReduxApi.Controllers
             return Ok(_mapper.Map<IEnumerable<UserListModel>>(result));
         }
 
-        private object GetUserToken(DbModels.UserModel user)
-        {
-            var claims = GetUserClaims(user);
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var token = GetSecurityToken(claims, tokenHandler);
-            return new {
-                id = user.Id,
-                userName = user.Login,
-                token = tokenHandler.WriteToken(token),
-                expired = token.ValidTo,
-                userType = user.UserType,
-                roles = user.Roles?.Select(role => role.Role.RoleCode) ?? Array.Empty<string>()
-            };
-        }
-
-        private ClaimsIdentity GetUserClaims(UserModel user)
-        {
-            if (user.Roles == null)
-                user.Roles = new List<UsersRoleRelation>();
-            var claims = new ClaimsIdentity(new Claim[]
-                                   {
-                                    new Claim(JwtRegisteredClaimNames.Sub, user.Login),
-                                    new Claim("UserId", user.Id.ToString()),
-                                    new Claim("UserType", user.UserType.ToString() )
-                                   });
-            switch (user.UserType)
-            {
-                case UserTypeEnum.Admin:
-                case UserTypeEnum.Manager:
-                    user.Roles.Add(new UsersRoleRelation { Role = new RoleModel { RoleCode = user.UserType.GetDisplayName() } });
-                    claims.AddClaim(new Claim(ClaimsIdentity.DefaultRoleClaimType, user.UserType.GetDisplayName()));
-                    break;
-            }
-            //Adding UserClaims to JWT claims
-            foreach (var item in user.Roles ?? new List<UsersRoleRelation>())
-            {
-                claims.AddClaim(new Claim(ClaimsIdentity.DefaultRoleClaimType, item.Role.RoleCode));
-            }
-            return claims;
-        }
-
-        private SecurityToken GetSecurityToken(ClaimsIdentity claims, JwtSecurityTokenHandler tokenHandler) {
-            // this information will be retrived from you Configuration
-            //I have injected Configuration provider service into my controller
-            var encryptionkey = _configuration["Jwt:EncriptionKey"];
-            var key = Encoding.ASCII.GetBytes(encryptionkey);
-            var tokenDescriptor = new SecurityTokenDescriptor
-            {
-                Issuer = _configuration["Jwt:Issuer"],
-                Subject = claims,
-                // this information will be retrived from you Configuration
-                //I have injected Configuration provider service into my controller
-                Expires = DateTime.UtcNow.AddMinutes(Convert.ToDouble(_configuration["Jwt:ExpiryTimeInMinutes"])),
-                //algorithm to sign the token
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
-            };
-
-            return tokenHandler.CreateToken(tokenDescriptor);
-        }
-
+        
         private BadRequestObjectResult ReturnBadRequest(string failedMessage)
         {
             return BadRequest(new ErrorMessageModel
