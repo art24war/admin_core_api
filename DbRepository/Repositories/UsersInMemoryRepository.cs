@@ -89,12 +89,21 @@ namespace DbRepository.Repositories
                 if (user.RefreshTokens == null)
                     user.RefreshTokens = new List<RefreshToken>();
                 var refreshTokens = await context.Entry(user).Collection(t => t.RefreshTokens).Query().ToListAsync();
-                
-                refreshTokens.ForEach(f => {
-                    context.Remove(f);
-                });
-                user.RefreshTokens.Add(token);
-                await context.SaveChangesAsync();
+                try
+                {
+                    user.RefreshTokens.Clear();
+                    user.RefreshTokens.Add(token);
+                    context.Entry(user).State = EntityState.Modified;
+                    await context.SaveChangesAsync();
+                }
+                catch(DbUpdateConcurrencyException ex)
+                {
+                    foreach(var e in ex.Entries)
+                    {
+                        context.Entry(e).State = EntityState.Modified;
+                    }
+                    await context.SaveChangesAsync();
+                }
             }
             return await Task.FromResult(new LoginResponse { User = user, LoginResult = user != null });
         }
